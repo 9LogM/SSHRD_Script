@@ -33,7 +33,6 @@ echo_error() {
 ERR_HANDLER () {
     [ $? -eq 0 ] && exit
     echo_error "[-] An error occurred"
-    rm -rf work 12rd | true
     killall iproxy > /dev/null 2>&1 | true
     if [ "$oscheck" = 'Linux' ]; then
         sudo killall usbmuxd > /dev/null 2>&1 | true
@@ -65,10 +64,6 @@ if [ "$1" = 'clean' ]; then
     echo_text "[*] Removed current SSH ramdisk"
     exit
 elif [ "$1" = 'dump-blobs' ]; then
-    if [ -s dumped.shsh2 ]; then
-        echo_error "[-] ERROR: Please rename current dumped.shsh2 first"
-        exit
-    fi
     if [ "$oscheck" = 'Linux' ]; then
         sudo systemctl stop usbmuxd > /dev/null 2>&1 | true
         sudo killall usbmuxd > /dev/null 2>&1 | true
@@ -85,13 +80,13 @@ elif [ "$1" = 'dump-blobs' ]; then
         device=rdisk1
     fi
     "$oscheck"/sshpass -p 'alpine' ssh -o StrictHostKeyChecking=no -p2222 root@localhost "cat /dev/$device" | dd of=dump.raw bs=256 count=$((0x4000))
-    "$oscheck"/img4tool --convert -s dumped.shsh2 dump.raw
+    "$oscheck"/img4tool --convert -s "$(date '+%Y-%m-%d_%H-%M-%S')".shsh2 dump.raw
     killall iproxy > /dev/null 2>&1 | true
     if [ "$oscheck" = 'Linux' ]; then
         sudo killall usbmuxd > /dev/null 2>&1 | true
     fi
     rm -f dump.raw
-    echo_text "[*] Onboard blobs should be dumped to dumped.shsh2"
+    echo_text "[*] Onboard blobs should be dumped to "$(date '+%Y-%m-%d_%H-%M-%S')".shsh2"
     echo_text "[*] If your device is on 16.0+, it is recommended to use Legacy iOS Kit to dump fully useful blobs, go here for more details: https://github.com/LukeZGD/Legacy-iOS-Kit/wiki/Saving-onboard-SHSH-blobs-of-current-iOS-version"
     exit
 elif [ "$1" = 'reboot' ]; then
@@ -133,8 +128,8 @@ elif [ "$1" = 'ssh' ]; then
         sudo usbmuxd -pf > /dev/null 2>&1 &
         sleep .1
     fi
-    if [ "$(cat sshramdisk/version.txt)" = '8.0' ]; then
-        echo_text "[*] If stuck here, unplug and replug device, run ./sshrd.sh ssh again. SSH into device and directly reboot, the A7 iOS 7 device will boot normally"
+    if [ -e sshramdisk/device_port_44 ]; then
+        echo_text "[*] If stuck here, unplug and replug device, run ./sshrd.sh ssh again"
         "$oscheck"/iproxy 2222 44 > /dev/null 2>&1 &
     else
         "$oscheck"/iproxy 2222 22 > /dev/null 2>&1 &
@@ -509,7 +504,6 @@ elif [ "$1" = '--brute-force' ]; then
     "$oscheck"/sshpass -p alpine ssh root@127.0.0.1 -p2222 -o StrictHostKeyChecking=no "mv -f /mnt2/mobile/Library/Preferences/com.apple.springboard.plist /mnt2/mobile/Library/Preferences/com.apple.springboard.plist.bak"
     "$oscheck"/sshpass -p alpine ssh root@127.0.0.1 -p2222 -o StrictHostKeyChecking=no "ln -s /com.apple.springboard.plist /mnt2/mobile/Library/Preferences/com.apple.springboard.plist"
     "$oscheck"/sshpass -p alpine ssh root@127.0.0.1 -p2222 -o StrictHostKeyChecking=no "rm -rf /mnt2/mobile/Library/SpringBoard/LockoutStateJournal.plist"
-    "$oscheck"/sshpass -p alpine ssh root@127.0.0.1 -p2222 -o StrictHostKeyChecking=no "/sbin/reboot"
     echo_text "[*] Now the device should get unlimited passcode attempts"
     killall iproxy > /dev/null 2>&1 | true
     if [ "$oscheck" = 'Linux' ]; then
@@ -536,6 +530,23 @@ elif [ "$1" = '--install-trollstore' ]; then
 elif [ "$1" = '--exit-recovery' ]; then
     "$oscheck"/irecovery -n
     exit
+elif [ "$1" = 'reset' ]; then
+    if [ "$oscheck" = 'Linux' ]; then
+        sudo systemctl stop usbmuxd > /dev/null 2>&1 | true
+        sudo killall usbmuxd > /dev/null 2>&1 | true
+        sleep .1
+        sudo usbmuxd -pf > /dev/null 2>&1 &
+        sleep .1
+    fi
+    "$oscheck"/iproxy 2222 22 > /dev/null 2>&1 &
+    "$oscheck"/sshpass -p alpine ssh root@127.0.0.1 -p2222 -o StrictHostKeyChecking=no "/usr/sbin/nvram oblit-inprogress=5"
+    echo_text "[*] Device should show a progress bar and erase all data after rebooting"
+    echo_text "[*] If running this command by mistake, SSH into device, run /usr/sbin/nvram -c"
+    killall iproxy > /dev/null 2>&1 | true
+    if [ "$oscheck" = 'Linux' ]; then
+        sudo killall usbmuxd > /dev/null 2>&1 | true
+    fi
+    exit
 elif [ "$oscheck" = 'Darwin' ]; then
     if ! (system_profiler SPUSBDataType 2> /dev/null | grep ' Apple Mobile Device (DFU Mode)' >> /dev/null); then
         echo_text "[*] Waiting for device in DFU mode"
@@ -559,115 +570,10 @@ check=$("$oscheck"/irecovery -q | grep CPID | sed 's/CPID: //')
 replace=$("$oscheck"/irecovery -q | grep MODEL | sed 's/MODEL: //')
 deviceid=$("$oscheck"/irecovery -q | grep PRODUCT | sed 's/PRODUCT: //')
 
-if [ "$1" = '8.0' ]; then
-    if [ "$deviceid" = 'iPhone6,1' ] || [ "$deviceid" = 'iPhone6,2' ] || [ "$deviceid" = 'iPad4,1' ] || [ "$deviceid" = 'iPad4,2' ] || [ "$deviceid" = 'iPad4,3' ] || [ "$deviceid" = 'iPad4,4' ] || [ "$deviceid" = 'iPad4,5' ] || [ "$deviceid" = 'iPad4,6' ]; then
-        ipswurl=$(curl -sL "https://api.ipsw.me/v4/device/$deviceid?type=ipsw" | "$oscheck"/jq '.firmwares | .[] | select(.version=="'$1'")' | "$oscheck"/jq -s '.[0] | .url' --raw-output)
-        rm -rf work sshramdisk; mkdir work sshramdisk
-        "$oscheck"/img4tool -e -s other/shsh/"${check}".shsh -m work/IM4M
-        cd work
-        ../"$oscheck"/pzb -g BuildManifest.plist "$ipswurl"
-        ../"$oscheck"/pzb -g "$(awk "/""${replace}""/{x=1}x&&/iBSS[.]/{print;exit}" BuildManifest.plist | grep '<string>' |cut -d\> -f2 |cut -d\< -f1)" "$ipswurl"
-        ../"$oscheck"/pzb -g "$(awk "/""${replace}""/{x=1}x&&/iBEC[.]/{print;exit}" BuildManifest.plist | grep '<string>' |cut -d\> -f2 |cut -d\< -f1)" "$ipswurl"
-        ../"$oscheck"/pzb -g "$(awk "/""${replace}""/{x=1}x&&/DeviceTree[.]/{print;exit}" BuildManifest.plist | grep '<string>' |cut -d\> -f2 |cut -d\< -f1)" "$ipswurl"
-        ../"$oscheck"/pzb -g "$(awk "/""${replace}""/{x=1}x&&/kernelcache.release/{print;exit}" BuildManifest.plist | grep '<string>' |cut -d\> -f2 |cut -d\< -f1)" "$ipswurl"
-        if [ "$oscheck" = 'Darwin' ]; then
-            ../"$oscheck"/pzb -g "$(/usr/bin/plutil -extract "BuildIdentities".0."Manifest"."RestoreRamDisk"."Info"."Path" xml1 -o - BuildManifest.plist | grep '<string>' |cut -d\> -f2 |cut -d\< -f1 | head -1)" "$ipswurl"
-        else
-            ../"$oscheck"/pzb -g "$(../Linux/PlistBuddy BuildManifest.plist -c "Print BuildIdentities:0:Manifest:RestoreRamDisk:Info:Path" | sed 's/"//g')" "$ipswurl"
-        fi
-        cd ..
-        "$oscheck"/img4 -i work/"$(awk "/""${replace}""/{x=1}x&&/iBSS[.]/{print;exit}" work/BuildManifest.plist | grep '<string>' |cut -d\> -f2 |cut -d\< -f1 | sed 's/Firmware[/]dfu[/]//')" -o work/iBSS.dec -k "$(cat other/ivkey/"$deviceid"_"$1"_iBSS)"
-        "$oscheck"/img4 -i work/"$(awk "/""${replace}""/{x=1}x&&/iBEC[.]/{print;exit}" work/BuildManifest.plist | grep '<string>' |cut -d\> -f2 |cut -d\< -f1 | sed 's/Firmware[/]dfu[/]//')" -o work/iBEC.dec -k "$(cat other/ivkey/"$deviceid"_"$1"_iBEC)"
-        "$oscheck"/kairos work/iBSS.dec work/iBSS.patched
-        "$oscheck"/img4 -i work/iBSS.patched -o sshramdisk/iBSS.img4 -M work/IM4M -A -T ibss
-        "$oscheck"/kairos work/iBEC.dec work/iBEC.patched -b "rd=md0 debug=0x2014e -v wdt=-1 nand-enable-reformat=1 -restore amfi=0xff cs_enforcement_disable=1"
-        "$oscheck"/img4 -i work/iBEC.patched -o sshramdisk/iBEC.img4 -M work/IM4M -A -T ibec
-        "$oscheck"/img4 -i work/"$(awk "/""${replace}""/{x=1}x&&/kernelcache.release/{print;exit}" work/BuildManifest.plist | grep '<string>' |cut -d\> -f2 |cut -d\< -f1)" -o work/kernelcache.im4p -k $(cat other/ivkey/"$deviceid"_"$1"_Kernelcache) -D
-    "$oscheck"/img4 -i work/kernelcache.im4p -o sshramdisk/kernelcache.img4 -M work/IM4M -T rkrn
-    "$oscheck"/img4 -i work/"$(awk "/""${replace}""/{x=1}x&&/DeviceTree[.]/{print;exit}" work/BuildManifest.plist | grep '<string>' | cut -d\> -f2 | cut -d\< -f1 | sed 's/Firmware[/]all_flash[/]all_flash[.].*[.]production[/]//')" -o work/dtree.raw -k $(cat other/ivkey/"$deviceid"_"$1"_DeviceTree)
-        "$oscheck"/img4 -i work/dtree.raw -o sshramdisk/devicetree.img4 -A -M work/IM4M -T rdtr
-        if [ "$oscheck" = 'Darwin' ]; then
-            "$oscheck"/img4 -i work/"$(/usr/bin/plutil -extract "BuildIdentities".0."Manifest"."RestoreRamDisk"."Info"."Path" xml1 -o - work/BuildManifest.plist | grep '<string>' |cut -d\> -f2 |cut -d\< -f1 | head -1)" -o work/ramdisk.dmg -k $(cat other/ivkey/"$deviceid"_"$1"_RestoreRamdisk)
-            hdiutil resize -size 50MB work/ramdisk.dmg
-            hdiutil attach -mountpoint /tmp/SSHRD work/ramdisk.dmg -owners off
-            "$oscheck"/gtar -x --no-overwrite-dir -f sshtars/iram.tar.gz -C /tmp/SSHRD/
-            hdiutil detach -force /tmp/SSHRD
-        else
-            "$oscheck"/img4 -i work/"$(Linux/PlistBuddy work/BuildManifest.plist -c "Print BuildIdentities:0:Manifest:RestoreRamDisk:Info:Path" | sed 's/"//g')" -o work/ramdisk.dmg -k $(cat other/ivkey/"$deviceid"_"$1"_RestoreRamdisk)
-            "$oscheck"/hfsplus work/ramdisk.dmg grow 50000000 > /dev/null
-            "$oscheck"/hfsplus work/ramdisk.dmg untar sshtars/iram.tar > /dev/null
-        fi
-        "$oscheck"/img4 -i work/ramdisk.dmg -o sshramdisk/ramdisk.img4 -M work/IM4M -A -T rdsk
-        echo $1 > sshramdisk/version.txt
-        rm -rf work
-        exit
-    else
-        echo_error "[-] ERROR: Unsupported. The only feature of 8.0 ramdisk is to exit recovery loop caused by iOS 9-12 ramdisk on A7 iOS 7 devices"
-        exit
-    fi
-fi
-if [ "$check" = '0x8960' ] && [ "$oscheck" = 'Linux' ]; then
-    if [ "$major" -eq 10 ] && [ "$minor" -eq 0 ]; then
-        a7_ramdisk_version='10.0.1'
-    elif [ "$major" -eq 10 ] && [ "$minor" -ge 1 ]; then
-        a7_ramdisk_version='10.3'
-    elif [ "$major" -eq 11 ] && [ "$minor" -lt 3 ]; then
-        a7_ramdisk_version='11.0'
-    else
-        a7_ramdisk_version='12.0'
-    fi
-    ipswurl=$(curl -sL "https://api.ipsw.me/v4/device/$deviceid?type=ipsw" | "$oscheck"/jq '.firmwares | .[] | select(.version=="'$a7_ramdisk_version'")' | "$oscheck"/jq -s '.[0] | .url' --raw-output)
-    version="$a7_ramdisk_version"
-    major=$(echo "$version" | cut -d. -f1)
-    minor=$(echo "$version" | cut -d. -f2)
-    patch=$(echo "$version" | cut -d. -f3)
-else
 ipswurl=$(curl -sL "https://api.ipsw.me/v4/device/$deviceid?type=ipsw" | "$oscheck"/jq '.firmwares | .[] | select(.version=="'$1'")' | "$oscheck"/jq -s '.[0] | .url' --raw-output)
-fi
-
-if [ -e work ]; then
-    rm -rf work
-fi
-
-if [ -e 12rd ]; then
-    rm -rf 12rd
-fi
-
-if [ ! -e sshramdisk ]; then
-    mkdir sshramdisk
-fi
-
-if [ "$1" = 'reset' ]; then
-    if [ ! -e sshramdisk/iBSS.img4 ]; then
-        echo_error "[-] ERROR: Please create an SSH ramdisk first!"
-        exit
-    fi
-
-    if [ "$check" = '0x8960' ] && [ "$oscheck" = 'Linux' ]; then
-        echo_warn "[!] WARNING: Linux and A7 device detected, the device must be manually placed into pwnDFU using ipwnder_lite, otherwise the process will fail"; sleep 5
-    else
-        "$oscheck"/gaster pwn > /dev/null
-    fi
-    "$oscheck"/gaster reset > /dev/null
-    "$oscheck"/irecovery -f sshramdisk/iBSS.img4
-    sleep 2
-    "$oscheck"/irecovery -f sshramdisk/iBEC.img4
-
-    if [ "$check" = '0x8010' ] || [ "$check" = '0x8015' ] || [ "$check" = '0x8011' ] || [ "$check" = '0x8012' ]; then
-        "$oscheck"/irecovery -c go
-    fi
-
-    sleep 2
-    "$oscheck"/irecovery -c "setenv oblit-inprogress 5"
-    "$oscheck"/irecovery -c saveenv
-    "$oscheck"/irecovery -c reset
-
-    echo_text "[*] Device should now show a progress bar and erase all data"
-    exit
-fi
 
 if [ "$1" = 'boot' ]; then
-    if [ ! -e sshramdisk/iBSS.img4 ]; then
+    if [ ! -e sshramdisk/iBSS.img4 ] || [ ! -e sshramdisk/iBEC.img4 ] || [ ! -e sshramdisk/kernelcache.img4 ] || [ ! -e sshramdisk/devicetree.img4 ] || [ ! -e sshramdisk/ramdisk.img4 ]; then
         echo_error "[-] ERROR: Please create an SSH ramdisk first!"
         exit
     fi
@@ -680,7 +586,13 @@ if [ "$1" = 'boot' ]; then
     patch=${patch:-0}
     
     if [ "$check" = '0x8960' ] && [ "$oscheck" = 'Linux' ]; then
-        echo_warn "[!] WARNING: Linux and A7 device detected, the device must be manually placed into pwnDFU using ipwnder_lite, otherwise the process will fail"; sleep 5
+        device_pwnd="$("$oscheck"/irecovery -q | grep "PWND" | cut -c 7-)"
+        if [ -z "$device_pwnd" ]; then
+            echo_error "[-] ERROR: Please use ipwnder_lite to enter pwnDFU mode first!"
+            exit
+        else
+            echo_text "[*] Pwned: "$device_pwnd""
+        fi
     else
         "$oscheck"/gaster pwn > /dev/null
     fi
@@ -703,32 +615,26 @@ if [ "$1" = 'boot' ]; then
     fi
     "$oscheck"/irecovery -f sshramdisk/devicetree.img4
     "$oscheck"/irecovery -c devicetree
-    if [ "$major" -lt 12 ]; then
-    :
-    else
-    "$oscheck"/irecovery -f sshramdisk/trustcache.img4
-    "$oscheck"/irecovery -c firmware
+    if [ "$major" -ge 12 ]; then
+        "$oscheck"/irecovery -f sshramdisk/trustcache.img4
+        "$oscheck"/irecovery -c firmware
     fi
     "$oscheck"/irecovery -f sshramdisk/kernelcache.img4
     "$oscheck"/irecovery -c bootx
 
-    echo_text "[*] Device should now show text on screen"
-    echo_text "[*] Run ./sshrd.sh ssh to SSH into device"
+    echo_text "[*] Device should now show text on screen, run ./sshrd.sh ssh to SSH into device"
     exit
 fi
 
-if [ ! -e work ]; then
-    mkdir work
-fi
-
 if [ "$check" = '0x8960' ] && [ "$oscheck" = 'Linux' ]; then
-    echo_warn "[!] WARNING: Linux and A7 device detected, assume device version is "$1", use "$a7_ramdisk_version" ramdisk"; sleep 3
+    echo_warn "[!] WARNING: Linux and A7 device detected, the device must be placed into pwnDFU using ipwnder_lite, otherwise the boot process will fail"; sleep 5
 else
     "$oscheck"/gaster pwn > /dev/null
 fi
+rm -rf sshramdisk work 12rd; mkdir work sshramdisk
 "$oscheck"/img4tool -e -s other/shsh/"${check}".shsh -m work/IM4M
-
 cd work
+
 ../"$oscheck"/pzb -g BuildManifest.plist "$ipswurl"
 ../"$oscheck"/pzb -g "$(awk "/""${replace}""/{x=1}x&&/iBSS[.]/{print;exit}" BuildManifest.plist | grep '<string>' |cut -d\> -f2 |cut -d\< -f1)" "$ipswurl"
 ../"$oscheck"/pzb -g "$(awk "/""${replace}""/{x=1}x&&/iBEC[.]/{print;exit}" BuildManifest.plist | grep '<string>' |cut -d\> -f2 |cut -d\< -f1)" "$ipswurl"
@@ -759,23 +665,29 @@ if [ "$oscheck" = 'Darwin' ]; then
 else
     ../"$oscheck"/pzb -g "$(../Linux/PlistBuddy BuildManifest.plist -c "Print BuildIdentities:0:Manifest:RestoreRamDisk:Info:Path" | sed 's/"//g')" "$ipswurl"
 fi
-
 cd ..
+
+# Use local ivkey file as a workaround for A7 pwndfu issue on Linux, avoiding `gaster decrypt` command
+devicetree_ivkey="$(sed -n "s/^"${replace}"_"${version}"_DeviceTree=\"\([^\"]*\)\"$/\1/p" other/ivkey)"
+ibec_ivkey="$(sed -n "s/^"${replace}"_"${version}"_iBEC=\"\([^\"]*\)\"$/\1/p" other/ivkey)"
+ibss_ivkey="$(sed -n "s/^"${replace}"_"${version}"_iBSS=\"\([^\"]*\)\"$/\1/p" other/ivkey)"
+kernelcache_ivkey="$(sed -n "s/^"${replace}"_"${version}"_Kernelcache=\"\([^\"]*\)\"$/\1/p" other/ivkey)"
+restoreramdisk_ivkey="$(sed -n "s/^"${replace}"_"${version}"_RestoreRamdisk=\"\([^\"]*\)\"$/\1/p" other/ivkey)"
+
 if [ "$major" -ge 18 ]; then    # iBSS and iBEC have been unencrypted since iOS 18
     "$oscheck"/img4 -i work/"$(awk "/""${replace}""/{x=1}x&&/iBSS[.]/{print;exit}" work/BuildManifest.plist | grep '<string>' |cut -d\> -f2 |cut -d\< -f1 | sed 's/Firmware[/]dfu[/]//')" -o work/iBSS.dec
     "$oscheck"/img4 -i work/"$(awk "/""${replace}""/{x=1}x&&/iBEC[.]/{print;exit}" work/BuildManifest.plist | grep '<string>' |cut -d\> -f2 |cut -d\< -f1 | sed 's/Firmware[/]dfu[/]//')" -o work/iBEC.dec
-elif [ "$check" = '0x8960' ] && [ "$oscheck" = 'Linux' ]; then
-    "$oscheck"/img4 -i work/"$(awk "/""${replace}""/{x=1}x&&/iBSS[.]/{print;exit}" work/BuildManifest.plist | grep '<string>' |cut -d\> -f2 |cut -d\< -f1 | sed 's/Firmware[/]dfu[/]//')" -o work/iBSS.dec -k "$(cat other/ivkey/"$deviceid"_"$a7_ramdisk_version"_iBSS)"
-    "$oscheck"/img4 -i work/"$(awk "/""${replace}""/{x=1}x&&/iBEC[.]/{print;exit}" work/BuildManifest.plist | grep '<string>' |cut -d\> -f2 |cut -d\< -f1 | sed 's/Firmware[/]dfu[/]//')" -o work/iBEC.dec -k "$(cat other/ivkey/"$deviceid"_"$a7_ramdisk_version"_iBEC)"
+elif [ "$check" = '0x8960' ]; then
+    "$oscheck"/img4 -i work/"$(awk "/""${replace}""/{x=1}x&&/iBSS[.]/{print;exit}" work/BuildManifest.plist | grep '<string>' |cut -d\> -f2 |cut -d\< -f1 | sed 's/Firmware[/]dfu[/]//')" -o work/iBSS.dec -k "$ibss_ivkey"
+    "$oscheck"/img4 -i work/"$(awk "/""${replace}""/{x=1}x&&/iBEC[.]/{print;exit}" work/BuildManifest.plist | grep '<string>' |cut -d\> -f2 |cut -d\< -f1 | sed 's/Firmware[/]dfu[/]//')" -o work/iBEC.dec -k "$ibec_ivkey"
 else
     "$oscheck"/gaster decrypt work/"$(awk "/""${replace}""/{x=1}x&&/iBSS[.]/{print;exit}" work/BuildManifest.plist | grep '<string>' |cut -d\> -f2 |cut -d\< -f1 | sed 's/Firmware[/]dfu[/]//')" work/iBSS.dec
     "$oscheck"/gaster decrypt work/"$(awk "/""${replace}""/{x=1}x&&/iBEC[.]/{print;exit}" work/BuildManifest.plist | grep '<string>' |cut -d\> -f2 |cut -d\< -f1 | sed 's/Firmware[/]dfu[/]//')" work/iBEC.dec
 fi
-
 if ([ "$major" -eq 10 ] && [ "$minor" -lt 3 ] || [ "$major" -lt 10 ]) || ([ "$major" -le 12 ] && ([ "$deviceid" = 'iPad6,3' ] || [ "$deviceid" = 'iPad6,4' ] || [ "$deviceid" = 'iPad6,7' ] || [ "$deviceid" = 'iPad6,8' ] || [ "$deviceid" = 'iPad6,11' ] || [ "$deviceid" = 'iPad6,12' ])); then
     "$oscheck"/kairos work/iBSS.dec work/iBSS.patched
     "$oscheck"/img4 -i work/iBSS.patched -o sshramdisk/iBSS.img4 -M work/IM4M -A -T ibss
-    "$oscheck"/kairos work/iBEC.dec work/iBEC.patched -b "rd=md0 debug=0x2014e -v wdt=-1 `if [ -z "$2" ]; then :; else echo "$2=$3"; fi` `if [ "$check" = '0x8960' ] || [ "$check" = '0x7000' ] || [ "$check" = '0x7001' ]; then echo "nand-enable-reformat=1 -restore"; fi`" -n
+    "$oscheck"/kairos work/iBEC.dec work/iBEC.patched -b "rd=md0 debug=0x2014e -v wdt=-1 `if [ -z "$2" ]; then :; else echo "$2=$3"; fi` `if [ "$check" = '0x8960' ] || [ "$check" = '0x7000' ] || [ "$check" = '0x7001' ]; then echo "nand-enable-reformat=1 -restore"; fi` `if [ "$major" -lt 10 ]; then echo "amfi=0xff cs_enforcement_disable=1"; fi`" -n
     "$oscheck"/img4 -i work/iBEC.patched -o sshramdisk/iBEC.img4 -M work/IM4M -A -T ibec
 else
     "$oscheck"/iBoot64Patcher work/iBSS.dec work/iBSS.patched
@@ -784,13 +696,17 @@ else
     "$oscheck"/img4 -i work/iBEC.patched -o sshramdisk/iBEC.img4 -M work/IM4M -A -T ibec
 fi   
 
-# Currently not working
 if [ "$major" -lt 10 ]; then
-    echo_text "iOS lower than 10 detected, using Kernel64Patcher for kernel patching"
-    "$oscheck"/img4 -i work/"$(awk "/""${replace}""/{x=1}x&&/kernelcache.release/{print;exit}" work/BuildManifest.plist | grep '<string>' |cut -d\> -f2 |cut -d\< -f1)" -o work/kcache.raw
-    "$oscheck"/Kernel64Patcher work/kcache.raw work/kcache.patched -a
-    "$oscheck"/kerneldiff work/kcache.raw work/kcache.patched work/kc.bpatch
-    "$oscheck"/img4 -i work/"$(awk "/""${replace}""/{x=1}x&&/kernelcache.release/{print;exit}" work/BuildManifest.plist | grep '<string>' |cut -d\> -f2 |cut -d\< -f1)" -o sshramdisk/kernelcache.img4 -M work/IM4M -T rkrn -P work/kc.bpatch `if [ "$oscheck" = 'Linux' ]; then echo "-J"; fi`
+    if [ "$check" = '0x8960' ]; then
+        :
+    else
+        kbag=$("$oscheck"/img4 -i work/"$(awk "/""${replace}""/{x=1}x&&/kernelcache.release/{print;exit}" work/BuildManifest.plist | grep '<string>' |cut -d\> -f2 |cut -d\< -f1)" -b | head -n 1)
+        iv=$("$oscheck"/gaster decrypt_kbag "$kbag" | tail -n 1 | cut -d ',' -f 1 | cut -d ' ' -f 2)
+        key=$("$oscheck"/gaster decrypt_kbag "$kbag" | tail -n 1 | cut -d ' ' -f 4)
+        kernelcache_ivkey="$iv$key"
+    fi
+    "$oscheck"/img4 -i work/"$(awk "/""${replace}""/{x=1}x&&/kernelcache.release/{print;exit}" work/BuildManifest.plist | grep '<string>' |cut -d\> -f2 |cut -d\< -f1)" -o work/kernelcache.im4p -k "$kernelcache_ivkey" -D
+    "$oscheck"/img4 -i work/kernelcache.im4p -o sshramdisk/kernelcache.img4 -M work/IM4M -T rkrn
 else
     "$oscheck"/img4 -i work/"$(awk "/""${replace}""/{x=1}x&&/kernelcache.release/{print;exit}" work/BuildManifest.plist | grep '<string>' |cut -d\> -f2 |cut -d\< -f1)" -o work/kcache.raw
     "$oscheck"/KPlooshFinder work/kcache.raw work/kcache.patched
@@ -798,9 +714,19 @@ else
     "$oscheck"/img4 -i work/"$(awk "/""${replace}""/{x=1}x&&/kernelcache.release/{print;exit}" work/BuildManifest.plist | grep '<string>' |cut -d\> -f2 |cut -d\< -f1)" -o sshramdisk/kernelcache.img4 -M work/IM4M -T rkrn -P work/kc.bpatch `if [ "$oscheck" = 'Linux' ]; then echo "-J"; fi`
 fi 
 
-if [ "$major" -eq 10 ] && [ "$minor" -lt 3 ] || [ "$major" -lt 10 ]; then
-    echo_text "iOS lower than 10.3 detected, BuildManifest is a little different"
+if [ "$major" -eq 10 ] && [ "$minor" -lt 3 ]; then
     "$oscheck"/img4 -i work/"$(awk "/""${replace}""/{x=1}x&&/DeviceTree[.]/{print;exit}" work/BuildManifest.plist | grep '<string>' | cut -d\> -f2 | cut -d\< -f1 | sed 's/Firmware[/]all_flash[/]all_flash[.].*[.]production[/]//')" -o sshramdisk/devicetree.img4 -M work/IM4M -T rdtr
+elif [ "$major" -lt 10 ]; then
+    if [ "$check" = '0x8960' ]; then
+        :
+    else
+        kbag=$("$oscheck"/img4 -i work/"$(awk "/""${replace}""/{x=1}x&&/DeviceTree[.]/{print;exit}" work/BuildManifest.plist | grep '<string>' | cut -d\> -f2 | cut -d\< -f1 | sed 's/Firmware[/]all_flash[/]all_flash[.].*[.]production[/]//')" -b | head -n 1)
+        iv=$("$oscheck"/gaster decrypt_kbag "$kbag" | tail -n 1 | cut -d ',' -f 1 | cut -d ' ' -f 2)
+        key=$("$oscheck"/gaster decrypt_kbag "$kbag" | tail -n 1 | cut -d ' ' -f 4)
+        devicetree_ivkey="$iv$key"
+    fi
+    "$oscheck"/img4 -i work/"$(awk "/""${replace}""/{x=1}x&&/DeviceTree[.]/{print;exit}" work/BuildManifest.plist | grep '<string>' | cut -d\> -f2 | cut -d\< -f1 | sed 's/Firmware[/]all_flash[/]all_flash[.].*[.]production[/]//')" -o work/dtree.raw -k "$devicetree_ivkey"
+    "$oscheck"/img4 -i work/dtree.raw -o sshramdisk/devicetree.img4 -A -M work/IM4M -T rdtr
 else
     "$oscheck"/img4 -i work/"$(awk "/""${replace}""/{x=1}x&&/DeviceTree[.]/{print;exit}" work/BuildManifest.plist | grep '<string>' |cut -d\> -f2 |cut -d\< -f1 | sed 's/Firmware[/]all_flash[/]//')" -o sshramdisk/devicetree.img4 -M work/IM4M -T rdtr
 fi   
@@ -810,26 +736,48 @@ if [ "$major" -ge 16 ]; then
 fi
 
 if [ "$oscheck" = 'Darwin' ]; then
-    if [ "$major" -lt 12 ]; then
-        :
-        else
+    if [ "$major" -ge 12 ]; then
         "$oscheck"/img4 -i work/"$(/usr/bin/plutil -extract "BuildIdentities".0."Manifest"."RestoreRamDisk"."Info"."Path" xml1 -o - work/BuildManifest.plist | grep '<string>' |cut -d\> -f2 |cut -d\< -f1 | head -1)".trustcache -o sshramdisk/trustcache.img4 -M work/IM4M -T rtsc
     fi
-    "$oscheck"/img4 -i work/"$(/usr/bin/plutil -extract "BuildIdentities".0."Manifest"."RestoreRamDisk"."Info"."Path" xml1 -o - work/BuildManifest.plist | grep '<string>' |cut -d\> -f2 |cut -d\< -f1 | head -1)" -o work/ramdisk.dmg
-else
-    if [ "$major" -lt 12 ]; then
-    :
+    if [ "$major" -lt 10 ]; then
+        if [ "$check" = '0x8960' ]; then
+            :
+        else
+            kbag=$("$oscheck"/img4 -i work/"$(/usr/bin/plutil -extract "BuildIdentities".0."Manifest"."RestoreRamDisk"."Info"."Path" xml1 -o - work/BuildManifest.plist | grep '<string>' |cut -d\> -f2 |cut -d\< -f1 | head -1)" -b | head -n 1)
+            iv=$("$oscheck"/gaster decrypt_kbag "$kbag" | tail -n 1 | cut -d ',' -f 1 | cut -d ' ' -f 2)
+            key=$("$oscheck"/gaster decrypt_kbag "$kbag" | tail -n 1 | cut -d ' ' -f 4)
+            restoreramdisk_ivkey="$iv$key"
+        fi
+        "$oscheck"/img4 -i work/"$(/usr/bin/plutil -extract "BuildIdentities".0."Manifest"."RestoreRamDisk"."Info"."Path" xml1 -o - work/BuildManifest.plist | grep '<string>' |cut -d\> -f2 |cut -d\< -f1 | head -1)" -o work/ramdisk.dmg -k "$restoreramdisk_ivkey"
     else
-    "$oscheck"/img4 -i work/"$(Linux/PlistBuddy work/BuildManifest.plist -c "Print BuildIdentities:0:Manifest:RestoreRamDisk:Info:Path" | sed 's/"//g')".trustcache -o sshramdisk/trustcache.img4 -M work/IM4M -T rtsc
+        "$oscheck"/img4 -i work/"$(/usr/bin/plutil -extract "BuildIdentities".0."Manifest"."RestoreRamDisk"."Info"."Path" xml1 -o - work/BuildManifest.plist | grep '<string>' |cut -d\> -f2 |cut -d\< -f1 | head -1)" -o work/ramdisk.dmg
     fi
-    "$oscheck"/img4 -i work/"$(Linux/PlistBuddy work/BuildManifest.plist -c "Print BuildIdentities:0:Manifest:RestoreRamDisk:Info:Path" | sed 's/"//g')" -o work/ramdisk.dmg
+else
+    if [ "$major" -ge 12 ]; then
+        "$oscheck"/img4 -i work/"$(Linux/PlistBuddy work/BuildManifest.plist -c "Print BuildIdentities:0:Manifest:RestoreRamDisk:Info:Path" | sed 's/"//g')".trustcache -o sshramdisk/trustcache.img4 -M work/IM4M -T rtsc
+    fi
+    if [ "$major" -lt 10 ]; then
+        if [ "$check" = '0x8960' ]; then
+            :
+        else
+            kbag=$("$oscheck"/img4 -i work/"$(Linux/PlistBuddy work/BuildManifest.plist -c "Print BuildIdentities:0:Manifest:RestoreRamDisk:Info:Path" | sed 's/"//g')" -b | head -n 1)
+            iv=$("$oscheck"/gaster decrypt_kbag "$kbag" | tail -n 1 | cut -d ',' -f 1 | cut -d ' ' -f 2)
+            key=$("$oscheck"/gaster decrypt_kbag "$kbag" | tail -n 1 | cut -d ' ' -f 4)
+            restoreramdisk_ivkey="$iv$key"
+        fi
+        "$oscheck"/img4 -i work/"$(Linux/PlistBuddy work/BuildManifest.plist -c "Print BuildIdentities:0:Manifest:RestoreRamDisk:Info:Path" | sed 's/"//g')" -o work/ramdisk.dmg -k "$restoreramdisk_ivkey"
+    else
+        "$oscheck"/img4 -i work/"$(Linux/PlistBuddy work/BuildManifest.plist -c "Print BuildIdentities:0:Manifest:RestoreRamDisk:Info:Path" | sed 's/"//g')" -o work/ramdisk.dmg
+    fi
 fi
 
 if [ "$oscheck" = 'Darwin' ]; then
     if [ "$major" -eq 16 ] && [ "$minor" -ge 1 ] || [ "$major" -gt 16 ]; then
     :
-    elif [ "$major" -eq 11 ] && [ "$minor" -lt 3 ] || [ "$major" -lt 11 ]; then
-        hdiutil resize -size 105MB work/ramdisk.dmg
+    elif [ "$major" -eq 11 ] && [ "$minor" -lt 3 ] || [ "$major" -eq 10 ] || [ "$major" -eq 9 ]; then
+        hdiutil resize -size 110MB work/ramdisk.dmg
+    elif [ "$major" -eq 7 ] || [ "$major" -eq 8 ]; then
+        hdiutil resize -size 50MB work/ramdisk.dmg
     else
         hdiutil resize -size 210MB work/ramdisk.dmg
     fi
@@ -849,24 +797,29 @@ if [ "$oscheck" = 'Darwin' ]; then
         "$oscheck"/gtar -x --no-overwrite-dir -f sshtars/t2ssh.tar.gz -C /tmp/SSHRD/
         echo_warn "[!] WARNING: T2 MIGHT HANG AND DO NOTHING WHEN BOOTING THE RAMDISK!"
     else
-    if [ "$major" -lt 12 ]; then
-        mkdir 12rd
-        ipswurl12=$(curl -sL "https://api.ipsw.me/v4/device/$deviceid?type=ipsw" | "$oscheck"/jq '.firmwares | .[] | select(.version=="'12.0'")' | "$oscheck"/jq -s '.[0] | .url' --raw-output)
-        cd 12rd
-        ../"$oscheck"/pzb -g BuildManifest.plist "$ipswurl12"
-        ../"$oscheck"/pzb -g "$(/usr/bin/plutil -extract "BuildIdentities".0."Manifest"."RestoreRamDisk"."Info"."Path" xml1 -o - BuildManifest.plist | grep '<string>' |cut -d\> -f2 |cut -d\< -f1 | head -1)" "$ipswurl12"
-                ../"$oscheck"/img4 -i "$(/usr/bin/plutil -extract "BuildIdentities".0."Manifest"."RestoreRamDisk"."Info"."Path" xml1 -o - BuildManifest.plist | grep '<string>' |cut -d\> -f2 |cut -d\< -f1 | head -1)" -o ramdisk.dmg
-        hdiutil attach -mountpoint /tmp/12rd ramdisk.dmg -owners off
-        cp /tmp/12rd/usr/lib/libiconv.2.dylib /tmp/12rd/usr/lib/libcharset.1.dylib /tmp/SSHRD/usr/lib/
-        hdiutil detach -force /tmp/12rd
-        cd ..
-        rm -rf 12rd
-    else
+        if [ "$major" -lt 12 ]; then
+            mkdir 12rd
+            ipswurl12=$(curl -sL "https://api.ipsw.me/v4/device/$deviceid?type=ipsw" | "$oscheck"/jq '.firmwares | .[] | select(.version=="'12.0'")' | "$oscheck"/jq -s '.[0] | .url' --raw-output)
+            cd 12rd
+            ../"$oscheck"/pzb -g BuildManifest.plist "$ipswurl12"
+            ../"$oscheck"/pzb -g "$(/usr/bin/plutil -extract "BuildIdentities".0."Manifest"."RestoreRamDisk"."Info"."Path" xml1 -o - BuildManifest.plist | grep '<string>' |cut -d\> -f2 |cut -d\< -f1 | head -1)" "$ipswurl12"
+            ../"$oscheck"/img4 -i "$(/usr/bin/plutil -extract "BuildIdentities".0."Manifest"."RestoreRamDisk"."Info"."Path" xml1 -o - BuildManifest.plist | grep '<string>' |cut -d\> -f2 |cut -d\< -f1 | head -1)" -o ramdisk.dmg
+            hdiutil attach -mountpoint /tmp/12rd ramdisk.dmg -owners off
+            cp /tmp/12rd/usr/lib/libiconv.2.dylib /tmp/12rd/usr/lib/libcharset.1.dylib /tmp/SSHRD/usr/lib/
+            hdiutil detach -force /tmp/12rd
+            cd ..
+            rm -rf 12rd
+        else
         :
-            fi
-        "$oscheck"/gtar -x --no-overwrite-dir -f sshtars/ssh.tar.gz -C /tmp/SSHRD/
+        fi
+        if [ "$major" -eq 7 ] || [ "$major" -eq 8 ]; then
+            "$oscheck"/gtar -x --no-overwrite-dir -f sshtars/iram.tar.gz -C /tmp/SSHRD/
+            touch sshramdisk/device_port_44
+        else
+            "$oscheck"/gtar -x --no-overwrite-dir -f sshtars/ssh.tar.gz -C /tmp/SSHRD/
+        fi
+        tar -xvf other/sbplist.tar -C /tmp/SSHRD/
     fi
-
     hdiutil detach -force /tmp/SSHRD
     if [ "$major" -eq 16 ] && [ "$minor" -ge 1 ] || [ "$major" -gt 16 ]; then
         hdiutil resize -sectors min work/ramdisk1.dmg
@@ -875,10 +828,12 @@ if [ "$oscheck" = 'Darwin' ]; then
     fi
 else
     if [ "$major" -eq 16 ] && [ "$minor" -ge 1 ] || [ "$major" -gt 16 ]; then
-        echo_error "[-] ERROR: Sorry, 16.1 and above doesn't work on Linux at the moment!"
+        echo_error "[-] ERROR: Creating 16.1+ ramdisk is only supported on macOS, this is due to ramdisks switching to APFS over HFS+, and another dmg library has to be used"
         exit
-    elif [ "$major" -eq 11 ] && [ "$minor" -lt 3 ] || [ "$major" -lt 11 ]; then
-        "$oscheck"/hfsplus work/ramdisk.dmg grow 105000000 > /dev/null
+    elif [ "$major" -eq 11 ] && [ "$minor" -lt 3 ] || [ "$major" -eq 10 ] || [ "$major" -eq 9 ]; then
+        "$oscheck"/hfsplus work/ramdisk.dmg grow 110000000 > /dev/null
+    elif [ "$major" -eq 7 ] || [ "$major" -eq 8 ]; then
+        "$oscheck"/hfsplus work/ramdisk.dmg grow 50000000 > /dev/null
     else
         "$oscheck"/hfsplus work/ramdisk.dmg grow 210000000 > /dev/null
     fi
@@ -889,23 +844,28 @@ else
         "$oscheck"/hfsplus work/ramdisk.dmg untar sshtars/t2ssh.tar > /dev/null
         echo_warn "[!] WARNING: T2 MIGHT HANG AND DO NOTHING WHEN BOOTING THE RAMDISK!"
     else
-    if [ "$major" -lt 12 ]; then
-        mkdir 12rd
-        ipswurl12=$(curl -sL "https://api.ipsw.me/v4/device/$deviceid?type=ipsw" | "$oscheck"/jq '.firmwares | .[] | select(.version=="'12.0'")' | "$oscheck"/jq -s '.[0] | .url' --raw-output)
-        cd 12rd
-        ../"$oscheck"/pzb -g BuildManifest.plist "$ipswurl12"
-        ../"$oscheck"/pzb -g "$(../Linux/PlistBuddy BuildManifest.plist -c "Print BuildIdentities:0:Manifest:RestoreRamDisk:Info:Path" | sed 's/"//g')" "$ipswurl12"
-        ../"$oscheck"/img4 -i "$(../Linux/PlistBuddy BuildManifest.plist -c "Print BuildIdentities:0:Manifest:RestoreRamDisk:Info:Path" | sed 's/"//g')" -o ramdisk.dmg
-        ../"$oscheck"/hfsplus ramdisk.dmg extract usr/lib/libcharset.1.dylib libcharset.1.dylib
-        ../"$oscheck"/hfsplus ramdisk.dmg extract usr/lib/libiconv.2.dylib libiconv.2.dylib
-        ../"$oscheck"/hfsplus ../work/ramdisk.dmg add libiconv.2.dylib usr/lib/libiconv.2.dylib
-        ../"$oscheck"/hfsplus ../work/ramdisk.dmg add libcharset.1.dylib usr/lib/libcharset.1.dylib
-        cd ..
-        rm -rf 12rd
-    else
-    :
+        if [ "$major" -lt 12 ]; then
+            mkdir 12rd
+            ipswurl12=$(curl -sL "https://api.ipsw.me/v4/device/$deviceid?type=ipsw" | "$oscheck"/jq '.firmwares | .[] | select(.version=="'12.0'")' | "$oscheck"/jq -s '.[0] | .url' --raw-output)
+            cd 12rd
+            ../"$oscheck"/pzb -g BuildManifest.plist "$ipswurl12"
+            ../"$oscheck"/pzb -g "$(../Linux/PlistBuddy BuildManifest.plist -c "Print BuildIdentities:0:Manifest:RestoreRamDisk:Info:Path" | sed 's/"//g')" "$ipswurl12"
+            ../"$oscheck"/img4 -i "$(../Linux/PlistBuddy BuildManifest.plist -c "Print BuildIdentities:0:Manifest:RestoreRamDisk:Info:Path" | sed 's/"//g')" -o ramdisk.dmg
+            ../"$oscheck"/hfsplus ramdisk.dmg extract usr/lib/libcharset.1.dylib libcharset.1.dylib
+            ../"$oscheck"/hfsplus ramdisk.dmg extract usr/lib/libiconv.2.dylib libiconv.2.dylib
+            ../"$oscheck"/hfsplus ../work/ramdisk.dmg add libiconv.2.dylib usr/lib/libiconv.2.dylib
+            ../"$oscheck"/hfsplus ../work/ramdisk.dmg add libcharset.1.dylib usr/lib/libcharset.1.dylib
+            cd ..
+            rm -rf 12rd
+        else
+        :
         fi
-        "$oscheck"/hfsplus work/ramdisk.dmg untar sshtars/ssh.tar > /dev/null
+        if [ "$major" -eq 7 ] || [ "$major" -eq 8 ]; then
+            "$oscheck"/hfsplus work/ramdisk.dmg untar sshtars/iram.tar > /dev/null
+            touch sshramdisk/device_port_44
+        else
+            "$oscheck"/hfsplus work/ramdisk.dmg untar sshtars/ssh.tar > /dev/null
+        fi
         "$oscheck"/hfsplus work/ramdisk.dmg untar other/sbplist.tar > /dev/null
     fi
 fi
@@ -921,8 +881,4 @@ fi
 "$oscheck"/img4 -i other/bootlogo.im4p -o sshramdisk/logo.img4 -M work/IM4M -A -T rlgo
 rm -rf work 12rd
 echo_text "[*] Finished! Please use ./sshrd.sh boot to boot your device"
-if [ "$check" = '0x8960' ] && [ "$oscheck" = 'Linux' ]; then
-    echo $a7_ramdisk_version > sshramdisk/version.txt
-else
-    echo $1 > sshramdisk/version.txt
-fi
+echo $1 > sshramdisk/version.txt
