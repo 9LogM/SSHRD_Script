@@ -565,11 +565,14 @@ else
     fi
 fi
 
-echo_text "[*] Getting device info and pwning... this may take a second"
-check=$("$oscheck"/irecovery -q | grep CPID | sed 's/CPID: //')
-replace=$("$oscheck"/irecovery -q | grep MODEL | sed 's/MODEL: //')
-deviceid=$("$oscheck"/irecovery -q | grep PRODUCT | sed 's/PRODUCT: //')
-
+echo_text "[*] Waiting for device connection..."
+until devinfo=$("$oscheck"/irecovery -q 2>/dev/null) && [ -n "$devinfo" ]; do
+    sleep 1
+done
+echo_text "[*] Getting device info and pwning..."
+check=$(printf '%s\n' "$devinfo" | grep -m1 '^CPID'    | sed -E 's/^CPID:[[:space:]]*//')
+replace=$(printf '%s\n' "$devinfo" | grep -m1 '^MODEL'   | sed -E 's/^MODEL:[[:space:]]*//')
+deviceid=$(printf '%s\n' "$devinfo" | grep -m1 '^PRODUCT' | sed -E 's/^PRODUCT:[[:space:]]*//')
 ipswurl=$(curl -sL "https://api.ipsw.me/v4/device/$deviceid?type=ipsw" | "$oscheck"/jq '.firmwares | .[] | select(.version=="'$1'")' | "$oscheck"/jq -s '.[0] | .url' --raw-output)
 
 if [ "$1" = 'boot' ]; then

@@ -3,9 +3,12 @@
 - All the extra features have been tested working on Ubuntu 24.04 and macOS Sonoma hackintosh. However there are no warranties especially for ARM macOS, please use at your own risk
 - Linux or macOS required. Virtual machine and windows are not and will never be supported even if some features are available on them. It is recommended to use USB-A cable and Intel PC
 - A7-A11 devices only. For 32-bit devices, use [Legacy iOS Kit](https://github.com/LukeZGD/Legacy-iOS-Kit)
+
+Changelog: https://github.com/9LogM/SSHRD_Script/wiki/Changelog
+
 ## Basic Usage: create ramdisk, boot ramdisk, SSH into device
 0. Clone this repository:   
-`git clone https://github.com/iPh0ne4s/SSHRD_Script --recursive`   
+`git clone https://github.com/9LogM/SSHRD_Script --recursive`   
 cd into SSHRD_Script directory. Run `chmod +x sshrd.sh` if running the script for the first time
 1. Run `./sshrd.sh <ramdisk version>` to create ramdisk
   - For iOS 7-9 devices, run `./sshrd.sh 12.0`
@@ -15,6 +18,7 @@ cd into SSHRD_Script directory. Run `chmod +x sshrd.sh` if running the script fo
   - It is common to see "an error occurred" or device rebooting, just try again
 2. Run `./sshrd.sh boot` to boot ramdisk, if unable to connect to device, unplug and replug the cable
 3. Run `./sshrd.sh ssh` to SSH into device, if the terminal says "WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!", run `rm -f ~/.ssh/known_hosts` and try again
+
 ## Other Commands
 ### In this part, unless otherwise specified, all the commands should be executed after booting ramdisk, i.e., after creating ramdisk and running `./sshrd.sh boot`, before `./sshrd.sh ssh`
 - Reboot device: `./sshrd.sh reboot`
@@ -33,6 +37,7 @@ cd into SSHRD_Script directory. Run `chmod +x sshrd.sh` if running the script fo
   - Do not mount any partition before running these commands
 - Install TrollStore on 14.0-16.6.1, 16.7 RC, 17.0: `./sshrd.sh --install-trollstore`
 - Un-disable and get unlimited passcode attempts on iOS 7-8: `./sshrd.sh --brute-force`
+
 ## Notes
 - On Linux, A7 devices must be manually placed into pwnDFU using [ipwnder_lite](https://github.com/LukeZGD/ipwnder_lite). [Usage](https://github.com/LukeZGD/Legacy-iOS-Kit/wiki/Pwning-Using-Another-iOS-Device)
 - If there are permission denied, terminated or operation not permitted errors with sshrd.sh, try running sshrd.sh with sudo, especially on macOS
