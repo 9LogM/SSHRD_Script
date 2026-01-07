@@ -527,6 +527,46 @@ elif [ "$1" = '--install-trollstore' ]; then
         sudo killall usbmuxd > /dev/null 2>&1 | true
     fi
     exit
+elif [ "$1" = '--block-ota' ]; then
+    if [ "$oscheck" = 'Linux' ]; then
+        sudo systemctl stop usbmuxd > /dev/null 2>&1 | true
+        sudo killall usbmuxd > /dev/null 2>&1 | true
+        sleep .1
+        sudo usbmuxd -pf > /dev/null 2>&1 &
+        sleep .1
+    fi
+    "$oscheck"/iproxy 2222 22 > /dev/null 2>&1 &
+    echo_text "[*] Mounting filesystems..."
+    "$oscheck"/sshpass -p alpine ssh root@127.0.0.1 -p2222 -o StrictHostKeyChecking=no "/usr/bin/mount_filesystems || true"
+    echo_text "[*] Creating OTA blocking plist..."
+    cat <<EOF > otablocker.plist
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>MobileAssetServerURL-com.apple.MobileAsset.MobileSoftwareUpdate.UpdateBrain</key>
+    <string>http://null</string>
+    <key>MobileAssetServerURL-com.apple.MobileAsset.RecoveryOSUpdate</key>
+    <string>http://null</string>
+    <key>MobileAssetServerURL-com.apple.MobileAsset.RecoveryOSUpdateBrain</key>
+    <string>http://null</string>
+    <key>MobileAssetServerURL-com.apple.MobileAsset.SoftwareUpdate</key>
+    <string>http://null</string>
+    <key>MobileAssetSUAllowOSVersionChange</key>
+    <false/>
+</dict>
+</plist>
+EOF
+    echo_text "[*] Pushing OTA blocker to device..."
+    "$oscheck"/sshpass -p alpine scp -P2222 -o StrictHostKeyChecking=no otablocker.plist root@127.0.0.1:/mnt2/mobile/Library/Preferences/com.apple.MobileAsset.plist
+    "$oscheck"/sshpass -p alpine ssh root@127.0.0.1 -p2222 -o StrictHostKeyChecking=no "chown mobile:mobile /mnt2/mobile/Library/Preferences/com.apple.MobileAsset.plist; chmod 644 /mnt2/mobile/Library/Preferences/com.apple.MobileAsset.plist"
+    rm otablocker.plist
+    echo_text "[*] OTA Updates blocked! The device will now fail to find updates."
+    killall iproxy > /dev/null 2>&1 | true
+    if [ "$oscheck" = 'Linux' ]; then
+        sudo killall usbmuxd > /dev/null 2>&1 | true
+    fi
+    exit
 elif [ "$1" = '--exit-recovery' ]; then
     "$oscheck"/irecovery -n
     exit
